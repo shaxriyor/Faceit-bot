@@ -188,7 +188,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 Список пуст.")
         return
 
-    msg_lines = ["\n╔════ 📊 Статистика игроков ════╗\n"]
+    msg_lines = ["\n📊 Статистика игроков\n"]
 
     async with aiohttp.ClientSession() as session:
         tasks = []
@@ -219,13 +219,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     save_players(data)
 
-    msg_lines.append("\n╚═════════════════════════╝")
-
     await update.message.reply_text("\n".join(msg_lines))
-
-
-
-
 
 # ==== Фоновая проверка изменений ELO ====
 async def check_elo_changes(app):
@@ -254,12 +248,11 @@ async def check_elo_changes(app):
         if changed_chats:
             save_players(data)
             for chat_id, changes in changed_chats.items():
-                msg_lines = ["╔════ 📊 Обновление ELO: ════╗\n"]
+                msg_lines = ["📊 Обновление ELO:\n"]
                 for i, (nickname, elo, change) in enumerate(sorted(changes, key=lambda x: x[1], reverse=True), start=1):
                     sign = "+" if change > 0 else ""
                     msg_lines.append(
                         f"{i}. {nickname} — {elo} ({sign}{change})")
-                    msg_lines.append("\n╚═══════════════════════════╝")
                 try:
                     await app.bot.send_message(chat_id=int(chat_id), text="\n".join(msg_lines))
                 except:
@@ -355,3 +348,4 @@ async def main():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+
