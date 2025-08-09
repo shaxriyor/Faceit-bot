@@ -6,7 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ==== КОНФИГ ====
-DATABASE_URL = os.getenv("DATABASE_URL")  # В Railway это переменная окружения с твоим connection string
+DATABASE_URL = os.getenv("postgresql://postgres:WwNDHmTBOqQeyfymoMygBDSGHQndGtTQ@postgres.railway.internal:5432/railway")  # В Railway это переменная окружения с твоим connection string
 FACEIT_API_KEY = "5929d726-8eb2-482b-9ca8-b4f5f1fbd13f"
 TELEGRAM_TOKEN = "8054498045:AAG6dXSRgz6D1LeDqt7PjMZcTYIGfHan80U"
 
@@ -245,3 +245,4 @@ if __name__ == "__main__":
     nest_asyncio.apply()
     import asyncio
     asyncio.run(main())
+
