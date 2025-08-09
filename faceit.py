@@ -14,9 +14,11 @@ pool = None  # Глобальный пул для подключения к БД
 
 # ==== ИНИЦИАЛИЗАЦИЯ БАЗЫ (создать таблицу players вручную на Railway!) ====
 
-
 async def create_pool():
-    return await asyncpg.create_pool(DATABASE_URL)
+    if not DATABASE_URL:
+        raise ValueError("DATABASE_URL is not set. Make sure it exists in Railway Variables.")
+    return await asyncpg.create_pool(DATABASE_URL, ssl='require')  # ssl='require' иногда нужен в Railway
+
 
 
 # ==== ФУНКЦИИ РАБОТЫ С БАЗОЙ ====
@@ -244,5 +246,6 @@ if __name__ == "__main__":
     nest_asyncio.apply()
     import asyncio
     asyncio.run(main())
+
 
 
