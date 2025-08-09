@@ -4,25 +4,37 @@ import aiohttp
 import asyncpg
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
+import nest_asyncio
 
 # ==== КОНФИГ ====
-DATABASE_URL = os.getenv("DATABASE_URL")
-FACEIT_API_KEY = "5929d726-8eb2-482b-9ca8-b4f5f1fbd13f"
-TELEGRAM_TOKEN = "8054498045:AAG6dXSRgz6D1LeDqt7PjMZcTYIGfHan80U"
+DATABASE_URL = os.getenv("DATABASE_URL")  # Railway variable
+FACEIT_API_KEY = os.getenv("FACEIT_API_KEY")  # Лучше хранить в переменной Railway
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Токен бота
 
-pool = None  # Глобальный пул для подключения к БД
+pool = None  # Глобальный пул подключений
 
-# ==== ИНИЦИАЛИЗАЦИЯ БАЗЫ (создать таблицу players вручную на Railway!) ====
 
+# ==== ИНИЦИАЛИЗАЦИЯ БАЗЫ ====
 async def create_pool():
+    global pool
     if not DATABASE_URL:
-        raise ValueError("DATABASE_URL is not set. Make sure it exists in Railway Variables.")
-    return await asyncpg.create_pool(DATABASE_URL, ssl='require')  # ssl='require' иногда нужен в Railway
+        raise ValueError("DATABASE_URL is not set. Add it in Railway Variables.")
+
+    pool = await asyncpg.create_pool(DATABASE_URL, ssl="require")
+
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS players (
+                chat_id TEXT NOT NULL,
+                nickname TEXT NOT NULL,
+                player_id TEXT NOT NULL,
+                elo INTEGER NOT NULL,
+                PRIMARY KEY (chat_id, nickname)
+            );
+        """)
 
 
-
-# ==== ФУНКЦИИ РАБОТЫ С БАЗОЙ ====
-
+# ==== РАБОТА С БАЗОЙ ====
 async def get_players(chat_id: str):
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT nickname, player_id, elo FROM players WHERE chat_id=$1", chat_id)
@@ -44,8 +56,13 @@ async def remove_player(chat_id, nickname):
         await conn.execute("DELETE FROM players WHERE chat_id=$1 AND nickname=$2", chat_id, nickname)
 
 
-# ==== FACEIT API ====
+async def get_all_chats():
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT DISTINCT chat_id FROM players")
+        return [row['chat_id'] for row in rows]
 
+
+# ==== FACEIT API ====
 async def get_player_data(nickname, session=None):
     url = f"https://open.faceit.com/data/v4/players?nickname={nickname}"
     headers = {"Authorization": f"Bearer {FACEIT_API_KEY}"}
@@ -84,12 +101,7 @@ async def get_current_elo(session, player_id):
         return data.get("games", {}).get("cs2", {}).get("faceit_elo")
 
 
-async def get_elo_by_id(session, player_id):
-    return await get_current_elo(session, player_id)
-
-
-# ==== Хэндлеры бота ====
-
+# ==== ХЭНДЛЕРЫ ====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type == "private":
         keyboard = [
@@ -174,13 +186,12 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         change = current_elo - prev_elo
         sign = "+" if change > 0 else ""
         msg_lines.append(f"{i}. {nickname} — {current_elo} ELO ({sign}{change})")
-        # Обновляем в БД
         await add_or_update_player(chat_id, nickname, players[nickname]["id"], current_elo)
 
     await update.message.reply_text("\n".join(msg_lines))
 
 
-# ==== Фоновая проверка изменений ELO ====
+# ==== АВТО-ОБНОВЛЕНИЕ ELO ====
 async def check_elo_changes(app):
     while True:
         chats = await get_all_chats()
@@ -193,17 +204,17 @@ async def check_elo_changes(app):
             for chat_id in chats:
                 players = await get_players(chat_id)
                 for nickname, pdata in players.items():
-                    tasks.append(get_elo_by_id(session, pdata["id"]))
-                    player_map.append((chat_id, nickname, pdata["elo"]))
+                    tasks.append(get_current_elo(session, pdata["id"]))
+                    player_map.append((chat_id, nickname, pdata["id"], pdata["elo"]))
 
             results = await asyncio.gather(*tasks)
 
-        for (chat_id, nickname, prev_elo), elo in zip(player_map, results):
+        for (chat_id, nickname, player_id, prev_elo), elo in zip(player_map, results):
             if elo is not None and elo != prev_elo:
                 if chat_id not in changed_chats:
                     changed_chats[chat_id] = []
                 changed_chats[chat_id].append((nickname, elo, elo - prev_elo))
-                await add_or_update_player(chat_id, nickname, pdata["id"], elo)
+                await add_or_update_player(chat_id, nickname, player_id, elo)
 
         for chat_id, changes in changed_chats.items():
             msg_lines = ["📊 Обновление ELO:\n"]
@@ -215,17 +226,10 @@ async def check_elo_changes(app):
             except Exception:
                 pass
 
-        await asyncio.sleep(10)
+        await asyncio.sleep(60)  # Проверка каждую минуту
 
 
-async def get_all_chats():
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT DISTINCT chat_id FROM players")
-        return [row['chat_id'] for row in rows]
-
-
-# ==== Запуск бота ====
-
+# ==== ЗАПУСК ====
 async def main():
     await create_pool()
 
@@ -235,17 +239,10 @@ async def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("unregister", unregister))
 
-    # Запуск фоновой задачи для проверки изменений ELO
     asyncio.create_task(check_elo_changes(app))
-
     await app.run_polling()
 
 
 if __name__ == "__main__":
-    import nest_asyncio
     nest_asyncio.apply()
-    import asyncio
     asyncio.run(main())
-
-
-
